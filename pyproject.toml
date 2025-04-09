@@ -1,33 +1,52 @@
 [project]
-name = "vocode-main"
-version = "0.1.0"
-description = ""
-authors = [
-    {name = "Mellettan",email = "roma23470@gmail.com"}
-]
-
-requires-python = ">=3.11 <4.0"
+name = "voicebot"
+version = "0.2.0"
+description = "Real-time голосовой ассистент: SaluteSpeech (STT/TTS) + GigaChat через WebSocket"
+readme = "README.md"
+authors = [{ name = "Roman Medvedev", email = "roma23470@gmail.com" }]
+requires-python = ">=3.12"
 dependencies = [
-    "requests (>=2.32.3,<3.0.0)",
-    "langchain-gigachat (>=0.3.4,<0.4.0)",
-    "langchain (>=0.3.19,<0.4.0)",
-    "langchain-community (>=0.3.18,<0.4.0)",
-    "loguru (>=0.7.3,<0.8.0)",
-    "grpcio (>=1.70.0,<2.0.0)",
-    "grpcio-tools (>=1.70.0,<2.0.0)",
-    "pyaudio (>=0.2.14,<0.3.0)",
-    "sounddevice (>=0.5.1,<0.6.0)",
-    "fastapi (>=0.115.11,<0.116.0)",
-    "websockets (>=15.0,<16.0)",
-    "uvicorn (>=0.34.0,<0.35.0)",
-    "redis (>=5.2.1,<6.0.0)",
-    "black (>=25.1.0,<26.0.0)",
-    "protobuf (>=5.26.1,<6.0dev)",
+    "fastapi>=0.115.11,<0.116",
+    "uvicorn[standard]>=0.34.0,<0.35",
+    "httpx>=0.28.1,<0.29",
+    "grpcio>=1.71.0,<2",
+    "protobuf>=5.29.3,<6",
+    "redis>=5.2.1,<6",
+    "langchain-core>=0.3.40,<0.4",
+    "langchain-gigachat>=0.3.4,<0.4",
+    "pydantic-settings>=2.8.1,<3",
+    "loguru>=0.7.3,<0.8",
 ]
 
-[tool.poetry]
-package-mode = false
+[project.scripts]
+voicebot = "voicebot.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "fakeredis>=2.28.0",
+    "ruff>=0.11.0",
+    "grpcio-tools>=1.71.0,<2",
+]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voicebot"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["src/voicebot/stt/proto"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
