@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Голосовой ассистент</title>
+    <style>
+        :root { --bg: #f6f7f9; --card: #fff; --user: #dbeafe; --bot: #eef0f3; --accent: #16a34a; --text: #111827; --muted: #6b7280; }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+        main { max-width: 680px; margin: 0 auto; padding: 24px 16px; display: flex; flex-direction: column; gap: 16px; min-height: 100vh; }
+        header { display: flex; justify-content: space-between; align-items: center; }
+        h1 { font-size: 20px; margin: 0; }
+        #status { font-size: 14px; color: var(--muted); }
+        #chat { flex: 1; background: var(--card); border-radius: 12px; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; min-height: 360px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+        .message { padding: 8px 12px; border-radius: 12px; max-width: 80%; line-height: 1.4; }
+        .user { background: var(--user); align-self: flex-end; }
+        .bot { background: var(--bot); align-self: flex-start; }
+        .partial { opacity: .6; }
+        .error { color: #b91c1c; align-self: center; font-size: 14px; }
+        .controls { display: flex; gap: 8px; justify-content: center; }
+        button { padding: 10px 20px; font-size: 16px; border-radius: 10px; border: 0; cursor: pointer; background: var(--accent); color: #fff; }
+        button:disabled { background: #9ca3af; cursor: default; }
+        #new-dialog { background: transparent; color: var(--muted); border: 1px solid #d1d5db; }
+    </style>
+</head>
+<body>
+<main>
+    <header>
+        <h1>Голосовой ассистент</h1>
+        <span id="status">не подключено</span>
+    </header>
+    <div id="chat"></div>
+    <div class="controls">
+        <button id="start">Начать разговор</button>
+        <button id="stop" disabled>Остановить</button>
+        <button id="new-dialog">Новый диалог</button>
+    </div>
+</main>
+
+<script>
+    const SAMPLE_RATE = 16000;
+    const SESSION_KEY = "voicebot-session";
+
+    const workletSource = `
+        class PcmCapture extends AudioWorkletProcessor {
+            constructor() { super(); this.buffer = []; this.size = 0; }
+            process(inputs) {
+                const channel = inputs[0][0];
+                if (!channel) return true;
+                const pcm = new Int16Array(channel.length);
+                for (let i = 0; i < channel.length; i++) {
+                    const s = Math.max(-1, Math.min(1, channel[i]));
+                    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+                }
+                this.buffer.push(pcm);
+                this.size += pcm.length;
+                if (this.size >= 1600) {
+                    const out = new Int16Array(this.size);
+                    let offset = 0;
+                    for (const part of this.buffer) { out.set(part, offset); offset += part.length; }
+                    this.port.postMessage(out.buffer, [out.buffer]);
+                    this.buffer = []; this.size = 0;
+                }
+                return true;
+            }
+        }
+        registerProcessor("pcm-capture", PcmCapture);
+    `;
+
+    const chat = document.getElementById("chat");
+    const statusLabel = document.getElementById("status");
+    const startButton = document.getElementById("start");
+    const stopButton = document.getElementById("stop");
+
+    let ws, audioContext, stream, capture;
+    let speaking = false;
+    let playing = false;
+    let responseDone = false;
+    let userBubble = null;
+    let botBubble = null;
+    const playback = [];
+
+    function setStatus(text) { statusLabel.textContent = text; }
+
+    function bubble(kind) {
+        const div = document.createElement("div");
+        div.className = `message ${kind} partial`;
+        chat.appendChild(div);
+        return div;
+    }
+
+    function render(div, text, final) {
+        div.textContent = text;
+        div.classList.toggle("partial", !final);
+        chat.scrollTop = chat.scrollHeight;
+    }
+
+    function showError(text) {
+        const div = document.createElement("div");
+        div.className = "message error";
+        div.textContent = text;
+        chat.appendChild(div);
+    }
+
+    function finishPlayback() {
+        if (responseDone && speaking && !playing) {
+            speaking = false;
+            setStatus("слушаю");
+            if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type: "playback_finished"}));
+        }
+    }
+
+    function playNext() {
+        const blob = playback.shift();
+        if (!blob) { playing = false; finishPlayback(); return; }
+        playing = true;
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = audio.onerror = () => { URL.revokeObjectURL(url); playNext(); };
+        audio.play().catch(() => { URL.revokeObjectURL(url); playNext(); });
+    }
+
+    function onMessage(event) {
+        if (typeof event.data !== "string") {
+            speaking = true;
+            setStatus("говорю");
+            playback.push(new Blob([event.data], {type: "audio/wav"}));
+            if (!playing) playNext();
+            return;
+        }
+        const message = JSON.parse(event.data);
+        if (message.type === "session") {
+            sessionStorage.setItem(SESSION_KEY, message.id);
+        } else if (message.type === "transcription") {
+            userBubble ??= bubble("user");
+            render(userBubble, message.text, message.status === "final");
+            if (message.status === "final") { userBubble = null; responseDone = false; setStatus("думаю"); }
+        } else if (message.type === "response") {
+            botBubble ??= bubble("bot");
+            render(botBubble, message.text, message.status === "final");
+            if (message.status === "final") { botBubble = null; responseDone = true; finishPlayback(); }
+        } else if (message.type === "error") {
+            showError(message.text);
+            setStatus("слушаю");
+        }
+    }
+
+    async function start() {
+        stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}});
+        audioContext = new AudioContext({sampleRate: SAMPLE_RATE});
+        const moduleUrl = URL.createObjectURL(new Blob([workletSource], {type: "application/javascript"}));
+        await audioContext.audioWorklet.addModule(moduleUrl);
+        capture = new AudioWorkletNode(audioContext, "pcm-capture");
+        audioContext.createMediaStreamSource(stream).connect(capture);
+
+        const protocol = location.protocol === "https:" ? "wss" : "ws";
+        const session = sessionStorage.getItem(SESSION_KEY);
+        const query = session ? `?session=${encodeURIComponent(session)}` : "";
+        ws = new WebSocket(`${protocol}://${location.host}/ws/voice${query}`);
+        ws.binaryType = "blob";
+        ws.onopen = () => { setStatus("слушаю"); startButton.disabled = true; stopButton.disabled = false; };
+        ws.onmessage = onMessage;
+        ws.onclose = () => stop();
+        capture.port.onmessage = (event) => {
+            if (!speaking && ws.readyState === WebSocket.OPEN) ws.send(event.data);
+        };
+    }
+
+    function stop() {
+        capture?.disconnect();
+        stream?.getTracks().forEach((track) => track.stop());
+        audioContext?.state !== "closed" && audioContext?.close();
+        if (ws && ws.readyState <= WebSocket.OPEN) ws.close();
+        playback.length = 0;
+        speaking = false;
+        playing = false;
+        setStatus("не подключено");
+        startButton.disabled = false;
+        stopButton.disabled = true;
+    }
+
+    startButton.addEventListener("click", () => start().catch((error) => { showError(`Нет доступа к микрофону: ${error.message}`); stop(); }));
+    stopButton.addEventListener("click", stop);
+    document.getElementById("new-dialog").addEventListener("click", () => {
+        sessionStorage.removeItem(SESSION_KEY);
+        chat.replaceChildren();
+        if (ws?.readyState === WebSocket.OPEN) { stop(); start(); }
+    });
+</script>
+</body>
+</html>
