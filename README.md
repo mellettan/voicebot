@@ -1,6 +1,6 @@
 # voicebot — голосовой ассистент на SaluteSpeech и GigaChat
 
-[![CI](https://github.com/mellettan/sber_sst_ai_tts/actions/workflows/ci.yml/badge.svg)](https://github.com/mellettan/sber_sst_ai_tts/actions/workflows/ci.yml)
+[![CI](https://github.com/mellettan/voicebot/actions/workflows/ci.yml/badge.svg)](https://github.com/mellettan/voicebot/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-WebSocket-009688?logo=fastapi&logoColor=white)
 ![gRPC](https://img.shields.io/badge/gRPC-streaming-244c5a)
